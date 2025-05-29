@@ -19,6 +19,7 @@ const char* topic1 = "task11.1/ledStateData";
 const char* topic2 = "task11.1/ledStateChangeCommand";
 const char* topic3 = "task11.1/ledValueCommand";
 const char* topic4 = "task11.1/ledBrightnessData";
+const char* topic_sensor_status = "task11.1/sensorStatus";
 
 
 const int motionPin = 2;
@@ -79,9 +80,29 @@ void TC_HANDLER() {
     // Increase counter value 
     timerCounter++;
     
-    // After 2 secs, update latestLightValue
+    // After 3 secs, update latestLightValue
     if (timerCounter >= 3) {
       latestLightValue = readLightValue();
+      if (latestLightValue < 0) {
+        setSafeLED();
+        timerCounter = 0;
+        return;
+      } else {
+        int pwmValue;
+        if (latestLightValue < 100) {
+        pwmValue = 255; // Maximum brightness
+        } else if (latestLightValue > 300) {
+          pwmValue = 0;
+          analogWrite(ledPin,0);
+        } else {
+        pwmValue = map(latestLightValue, 100, 300, 255, 0); // Map lux from 100 to 1000
+        }
+        pwmValue = constrain(pwmValue, 0, 255);  // Ensure it's within PWM range
+        if (ledState & pwmValue != 0) {
+          currentBrightness = map(pwmValue, 0, 255, 0, 100);
+          setIntensity(pwmValue);
+        }
+      }
       sendData(latestLightValue, ledState, currentBrightness);
       timerCounter = 0;
     }
@@ -89,7 +110,6 @@ void TC_HANDLER() {
 }
 
 void setup() {
-  Serial.begin(115200);
   connectToWiFi();
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
@@ -109,9 +129,26 @@ void setup() {
 float readLightValue() {
   if (lightMeter.measurementReady()) {
     float lux = lightMeter.readLightLevel();
-    return lux; // Return the lux value
+    if (lux < 0 || lux > 100000) {
+      Serial.println("Invalid sensor reading detected!");
+      sendSensorStatus(false);  // Gửi trạng thái lỗi
+      return -1.0;
+    }
+    sendSensorStatus(true);  // Gửi trạng thái OK
+    return lux;
   }
-  return 0.0; // Return 0 if measurement is not ready
+  Serial.println("Measurement not ready");
+  sendSensorStatus(false);  // Gửi trạng thái lỗi
+  return -1.0;
+}
+
+
+void setSafeLED() {
+  Serial.println("Setting LED to safe mode due to sensor error.");
+  setIntensity(0);  // Turn off LED
+  ledState = false;
+  motionDetected = false;
+  currentBrightness = 0;
 }
 
 void connectToWiFi() {
@@ -129,18 +166,22 @@ void connectToWiFi() {
 void turnOffCommand() {
   setIntensity(0);
   currentBrightness = 0;
-  motionDetected = false;
 }
 
 void turnOnCommand() {
   float lux = readLightValue();
+  if (lux < 0) {
+    // Error value, set to safemode
+    setSafeLED();
+    return;
+  }
   int pwmValue;
   if (lux < 100) {
     pwmValue = 255; // Maximum brightness
-  } else if (lux > 1000) {
+  } else if (lux > 300) {
     pwmValue = 0; // Turn off the LED
   } else {
-    pwmValue = map(lux, 100, 1000, 255, 0); // Map lux from 100 to 1000
+    pwmValue = map(lux, 100, 300, 255, 0); // Map lux from 100 to 1000
   }
   pwmValue = constrain(pwmValue, 0, 255);  // Ensure it's within PWM range
   currentBrightness = map(pwmValue, 0, 255, 0, 100);
@@ -205,6 +246,16 @@ void setIntensity(int percentage) {
   }
 }
 
+void sendSensorStatus(bool status) {
+  // status = true: cảm biến OK, false: lỗi cảm biến
+  String statusMsg = status ? "OK" : "ERROR";
+  if (client.publish(topic_sensor_status, statusMsg.c_str())) {
+    Serial.println("Sensor status sent: " + statusMsg);
+  } else {
+    Serial.println("Failed to send sensor status");
+  }
+}
+
 void sendData(float lux, bool ledState, int currentBrightness) {
   // Convert lux to a string and publish to the sensorData topic
   String luxMessage = String(lux);
@@ -233,16 +284,21 @@ void sendData(float lux, bool ledState, int currentBrightness) {
 void motionHandler() {
   if (!motionDetected) {
     float lux = readLightValue();
+    if (lux < 0) {
+    // Error value, set LED to safe mode
+    setSafeLED();
+    return;
+  }
     int pwmValue;
     if (!(!(WiFi.status() != WL_CONNECTED) && client.connected())) {
-      pwmValue = 255;o
+      pwmValue = 255;
     } else {
       if (lux < 100) {
         pwmValue = 255; // Maximum brightness
-      } else if (lux > 1000) {
+      } else if (lux > 300) {
         pwmValue = 0; // Turn off the LED
       } else {
-        pwmValue = map(lux, 100, 1000, 255, 0); // Map lux from 100 to 1000
+        pwmValue = map(lux, 100, 300, 255, 0); // Map lux from 100 to 1000
       }
       pwmValue = constrain(pwmValue, 0, 255);  // Ensure it's within PWM range
     }
@@ -255,7 +311,7 @@ void motionHandler() {
     } else {
       ledState = false;
     }
-    Serial.print("Motion detected");
+    Serial.println("Motion detected");
     Serial.print("Light: ");
     Serial.print(lux);
     Serial.println(" lx");
@@ -272,6 +328,7 @@ void timeCheck() {
     analogWrite(ledPin, 0); // Turn off LED
     ledState = false; // Toggle state
     motionDetected = false; // Reset motion flag
+    currentBrightness = 0;
     Serial.println("LED turned off due to inactivity.");
   }
 }
