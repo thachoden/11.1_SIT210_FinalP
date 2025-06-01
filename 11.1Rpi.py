@@ -13,6 +13,8 @@ topic_led_state = "task11.1/ledStateData"
 topic_led_brightness = "task11.1/ledBrightnessData"
 topic_led_command = "task11.1/ledStateChangeCommand"
 topic_led_value_command = "task11.1/ledValueCommand"
+topic_sensor_status = "task11.1/sensorStatus"
+topic_motion_sensor_status = "task11.1/motionSensorStatus"  
 cBrightness = 0
 controls_enabled = True  # Flag to track if controls are enabled
 
@@ -23,6 +25,13 @@ root.title("MQTT Sensor Data")
 # Create labels to display lux value, LED state, and brightness
 lux_label = tk.Label(root, text="Lux Value: N/A", font=("Helvetica", 16))
 lux_label.pack(pady=10)
+
+sensor_status_label = tk.Label(root, text="Light Sensor Status: N/A", font=("Helvetica", 16))
+sensor_status_label.pack(pady=10)
+
+# Add label to display motion sensor status
+motion_sensor_status_label = tk.Label(root, text="Motion Sensor Status: N/A", font=("Helvetica", 16))
+motion_sensor_status_label.pack(pady=10)
 
 led_label = tk.Label(root, text="LED State: N/A", font=("Helvetica", 16))
 led_label.pack(pady=10)
@@ -76,6 +85,21 @@ def on_led_brightness(client, userdata, message):
     brightness_label.config(text=f"Brightness Value: {brightness_value}")
     print(f"Received LED Brightness: {brightness_value}")
 
+def on_sensor_status(client, userdata, message):
+    status = message.payload.decode()
+    if status == "OK":
+        sensor_status_label.config(text="Light Sensor Status: Working", bg="green")
+    else:
+        sensor_status_label.config(text="Light Sensor Status: ERROR - Check Sensor", bg="red")
+
+# Callback to handle motion sensor status messages
+def on_motion_sensor_status(client, userdata, message):
+    status = message.payload.decode()
+    if status == "OK":
+        motion_sensor_status_label.config(text="Motion Sensor Status: Working", bg="green")
+    else:
+        motion_sensor_status_label.config(text="Motion Sensor Status: Warning - Check Sensor", bg="yellow")
+
 # Function to disable all controls
 def disable_all_controls():
     set_button.config(state=tk.DISABLED)
@@ -88,14 +112,16 @@ def enable_all_controls():
         toggle_button.config(state=tk.NORMAL)
         led_value_slider.config(state=tk.NORMAL)
 def enable_all_controls_after_delay():
-    time.sleep(30)
+    time.sleep(20)
     controls_enabled = True
-    root.after(0, enable_all_controls)  
+    root.after(0, enable_all_controls) 
+    client.subscribe(topic_led_state)
     led_value_slider.set(cBrightness)
 
 
 # Function to toggle LED state and publish the new value
 def toggle_led():
+    client.unsubscribe(topic_led_state)
     global controls_enabled
     disable_all_controls()
     controls_enabled = False
@@ -124,6 +150,8 @@ client.on_message = on_sensor_data
 client.message_callback_add(topic_sensor_data, on_sensor_data)
 client.message_callback_add(topic_led_state, on_led_state)
 client.message_callback_add(topic_led_brightness, on_led_brightness)
+client.message_callback_add(topic_sensor_status, on_sensor_status)
+client.message_callback_add(topic_motion_sensor_status, on_motion_sensor_status)
 
 # Handle disconnection
 def on_disconnect(client, userdata, rc):
@@ -143,6 +171,8 @@ try:
     client.subscribe(topic_sensor_data)
     client.subscribe(topic_led_state)
     client.subscribe(topic_led_brightness)
+    client.subscribe(topic_sensor_status)
+    client.subscribe(topic_motion_sensor_status) 
 except Exception as e:
     print(f"Failed to connect to MQTT broker: {e}")
 
