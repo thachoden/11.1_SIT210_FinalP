@@ -31,9 +31,16 @@ class SensorGUI:
       self.frame = tk.Frame(parent, bd=2, relief=tk.SUNKEN, padx=10, pady=10)
       self.frame.pack(pady=10, fill=tk.X)
 
-      self.title_label = tk.Label(self.frame, text=f"Sensor ID: {sensor_id}", font=("Helvetica", 14, "bold"))
-      self.title_label.pack()
+      # Header frame with title and remove button
+      header_frame = tk.Frame(self.frame)
+      header_frame.pack(fill=tk.X, pady=(0, 10))
 
+      self.title_label = tk.Label(header_frame, text=f"Sensor ID: {sensor_id}", font=("Helvetica", 14, "bold"))
+      self.title_label.pack(side=tk.LEFT)
+
+      # Remove button in top right corner
+      self.remove_button = tk.Button(header_frame, text="X", command=self.remove_gui, font=("Helvetica", 12, "bold"), fg="red", width=3, height=1, relief=tk.RAISED)
+      self.remove_button.pack(side=tk.RIGHT)
       self.lux_label = tk.Label(self.frame, text="Lux Value: N/A", font=("Helvetica", 16))
       self.lux_label.pack(pady=5)
 
@@ -66,6 +73,50 @@ class SensorGUI:
       # Subscribe to topics - do this after client is connected
       self.subscribe_to_topics()
   
+  def remove_gui(self):
+      """Remove this GUI and clean up subscriptions"""
+      # Confirm removal
+      result = messagebox.askyesno("Confirm Removal", 
+                                 f"Are you sure you want to remove Sensor ID: {self.sensor_id}?")
+      if result:
+          # Unsubscribe from all topics
+          self.unsubscribe_from_topics()
+          
+          # Remove message callbacks
+          self.remove_message_callbacks()
+          
+          # Destroy the GUI frame
+          self.frame.destroy()
+          
+          # Call the removal callback to update the main list
+          self.remove_callback(self)
+          
+          print(f"Removed sensor GUI: {self.sensor_id}")
+
+  def unsubscribe_from_topics(self):
+      """Unsubscribe from all topics for this sensor"""
+      try:
+          self.client.unsubscribe(self.topic_sensor_data)
+          self.client.unsubscribe(self.topic_led_state)
+          self.client.unsubscribe(self.topic_led_brightness)
+          self.client.unsubscribe(self.topic_light_sensor)
+          self.client.unsubscribe(self.topic_motion_sensor)
+          print(f"Unsubscribed from all topics for sensor {self.sensor_id}")
+      except Exception as e:
+          print(f"Error unsubscribing for sensor {self.sensor_id}: {e}")
+
+  def remove_message_callbacks(self):
+      """Remove message callbacks for this sensor"""
+      try:
+          self.client.message_callback_remove(self.topic_sensor_data)
+          self.client.message_callback_remove(self.topic_led_state)
+          self.client.message_callback_remove(self.topic_led_brightness)
+          self.client.message_callback_remove(self.topic_light_sensor)
+          self.client.message_callback_remove(self.topic_motion_sensor)
+          print(f"Removed message callbacks for sensor {self.sensor_id}")
+      except Exception as e:
+          print(f"Error removing callbacks for sensor {self.sensor_id}: {e}")
+
   def subscribe_to_topics(self):
       """Subscribe to all topics for this sensor"""
       if hasattr(self.client, 'connected_flag') and self.client.connected_flag:
@@ -159,7 +210,7 @@ class SensorGUI:
 def main():
   root = tk.Tk()
   root.title("MQTT Sensor Data Multiple")
-  root.geometry("800x600")  # Set window size
+  root.geometry("600x600")  # Set window size
 
   client = mqtt.Client()
 
@@ -269,20 +320,6 @@ def main():
 
   add_button = tk.Button(button_frame, text="ADD", command=add_gui)
   add_button.pack(pady=5)
-
-  # Test button to publish test messages
-  def publish_test_message():
-      if gui_list:
-          test_sensor_id = gui_list[0].sensor_id
-          client.publish(f"task11.1/sensorData/{test_sensor_id}", "123.45")
-          client.publish(f"task11.1/ledStateData/{test_sensor_id}", "1")
-          client.publish(f"task11.1/ledBrightnessData/{test_sensor_id}", "75")
-          client.publish(f"task11.1/sensorStatus/{test_sensor_id}", "OK")
-          client.publish(f"task11.1/motionSensorStatus/{test_sensor_id}", "OK")
-          print(f"Published test messages for sensor {test_sensor_id}")
-
-  test_button = tk.Button(button_frame, text="Test Publish", command=publish_test_message)
-  test_button.pack(pady=5)
 
   # Create first default sensor GUI (can be removed if desired)
   add_gui()
