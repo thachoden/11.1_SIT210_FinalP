@@ -40,7 +40,7 @@ class SensorGUI:
       self.title_label.pack(side=tk.LEFT)
 
       # Remove button in top right corner
-      self.remove_button = tk.Button(header_frame, text="✕", command=self.remove_gui, 
+      self.remove_button = tk.Button(header_frame, text="X", command=self.remove_gui, 
                                    font=("Helvetica", 12, "bold"), fg="red", 
                                    width=3, height=1, relief=tk.RAISED)
       self.remove_button.pack(side=tk.RIGHT)
@@ -332,19 +332,7 @@ def main():
   add_button = tk.Button(button_frame, text="ADD", command=add_gui)
   add_button.pack(pady=5)
 
-  # Test button to publish test messages
-  def publish_test_message():
-      if gui_list:
-          test_sensor_id = gui_list[0].sensor_id
-          client.publish(f"task11.1/sensorData/{test_sensor_id}", "123.45")
-          client.publish(f"task11.1/ledStateData/{test_sensor_id}", "1")
-          client.publish(f"task11.1/ledBrightnessData/{test_sensor_id}", "75")
-          client.publish(f"task11.1/sensorStatus/{test_sensor_id}", "OK")
-          client.publish(f"task11.1/motionSensorStatus/{test_sensor_id}", "OK")
-          print(f"Published test messages for sensor {test_sensor_id}")
 
-  test_button = tk.Button(button_frame, text="Test Publish", command=publish_test_message)
-  test_button.pack(pady=5)
 
   # Create first default sensor GUI (can be removed if desired)
   add_gui()
