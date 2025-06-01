@@ -13,15 +13,16 @@ const char* ssid = "Quang Huy";
 const char* password = "Danang040903";
 
 // MQTT Broker
+const int ID = 1;
 const char* mqtt_server = "broker.emqx.io";
 const int mqtt_port = 1883;
-const char* topic = "task11.1/sensorData";
-const char* topic1 = "task11.1/ledStateData";
-const char* topic2 = "task11.1/ledStateChangeCommand";
-const char* topic3 = "task11.1/ledValueCommand";
-const char* topic4 = "task11.1/ledBrightnessData";
-const char* topic_sensor_status = "task11.1/sensorStatus";
-const char* topic_motion_sensor_status = "task11.1/motionSensorStatus";  // New topic for motion sensor status
+char topic[50];
+char topic1[50];
+char topic2[50];
+char topic3[50];
+char topic4[50];
+char topic_sensor_status[50];
+char topic_motion_sensor_status[50];
 
 const int motionPin = 2;
 const int ledPin = 3;
@@ -91,7 +92,7 @@ void TC_HANDLER() {
     if (timerCounter >= 3) {
       latestLightValue = readLightValue();
       if (latestLightValue < 0) {
-        setSafeLED();
+        sendData(latestLightValue, ledState, currentBrightness);
         timerCounter = 0;
         return;
       } else {
@@ -118,6 +119,14 @@ void TC_HANDLER() {
 }
 
 void setup() {
+  sprintf(topic, "task11.1/sensorData/%d", ID);
+  sprintf(topic1, "task11.1/ledStateData/%d", ID);
+  sprintf(topic2, "task11.1/ledStateChangeCommand/%d", ID);
+  sprintf(topic3, "task11.1/ledValueCommand/%d", ID);
+  sprintf(topic4, "task11.1/ledBrightnessData/%d", ID);
+  sprintf(topic_sensor_status, "task11.1/sensorStatus/%d", ID);
+  sprintf(topic_motion_sensor_status, "task11.1/motionSensorStatus/%d", ID);
+
   Serial.begin(115200);
   connectToWiFi();
   client.setServer(mqtt_server, mqtt_port);
@@ -182,8 +191,9 @@ void turnOffCommand() {
 void turnOnCommand() {
   float lux = readLightValue();
   if (lux < 0) {
-    // Error value, set to safemode
-    setSafeLED();
+    // Error value, turn on light
+    setIntensity(255);
+    currentBrightness = 100;
     return;
   }
   int pwmValue;
@@ -309,7 +319,6 @@ void motionHandler() {
     float lux = readLightValue();
     if (lux < 0) {
       // Error value, set LED to safe mode
-      setSafeLED();
       return;
     }
     int pwmValue;
