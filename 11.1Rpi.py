@@ -11,12 +11,13 @@ broker = "broker.emqx.io"
 port = 1883
 
 class SensorGUI:
-  def __init__(self, parent, client, sensor_id):
+  def __init__(self, parent, client, sensor_id, remove_callback):
       self.client = client
       self.sensor_id = sensor_id
       self.cBrightness = 0
       self.controls_enabled = True
       self.led_state = False
+      self.remove_callback = remove_callback
 
       # Topics specific to sensor_id
       self.topic_sensor_data = f"task11.1/sensorData/{sensor_id}"
@@ -39,8 +40,11 @@ class SensorGUI:
       self.title_label.pack(side=tk.LEFT)
 
       # Remove button in top right corner
-      self.remove_button = tk.Button(header_frame, text="X", command=self.remove_gui, font=("Helvetica", 12, "bold"), fg="red", width=3, height=1, relief=tk.RAISED)
+      self.remove_button = tk.Button(header_frame, text="✕", command=self.remove_gui, 
+                                   font=("Helvetica", 12, "bold"), fg="red", 
+                                   width=3, height=1, relief=tk.RAISED)
       self.remove_button.pack(side=tk.RIGHT)
+
       self.lux_label = tk.Label(self.frame, text="Lux Value: N/A", font=("Helvetica", 16))
       self.lux_label.pack(pady=5)
 
@@ -72,7 +76,7 @@ class SensorGUI:
 
       # Subscribe to topics - do this after client is connected
       self.subscribe_to_topics()
-  
+
   def remove_gui(self):
       """Remove this GUI and clean up subscriptions"""
       # Confirm removal
@@ -116,7 +120,7 @@ class SensorGUI:
           print(f"Removed message callbacks for sensor {self.sensor_id}")
       except Exception as e:
           print(f"Error removing callbacks for sensor {self.sensor_id}: {e}")
-
+  
   def subscribe_to_topics(self):
       """Subscribe to all topics for this sensor"""
       if hasattr(self.client, 'connected_flag') and self.client.connected_flag:
@@ -210,7 +214,7 @@ class SensorGUI:
 def main():
   root = tk.Tk()
   root.title("MQTT Sensor Data Multiple")
-  root.geometry("600x600")  # Set window size
+  root.geometry("800x600")  # Set window size
 
   client = mqtt.Client()
 
@@ -218,6 +222,13 @@ def main():
   client.connected_flag = False
 
   gui_list = []
+
+  def remove_gui_from_list(gui):
+      """Remove GUI from the main list and update scroll region"""
+      if gui in gui_list:
+          gui_list.remove(gui)
+          # Update scroll region after removing GUI
+          root.after(100, lambda: canvas.configure(scrollregion=canvas.bbox("all")))
 
   def on_message(client, userdata, message):
       """Global message handler for debugging"""
@@ -305,7 +316,7 @@ def main():
               messagebox.showerror("Error", f"Sensor ID '{sensor_id}' already exists!")
               return
       
-      gui = SensorGUI(container, client, sensor_id)
+      gui = SensorGUI(container, client, sensor_id, remove_gui_from_list)
       gui_list.append(gui)
       
       # Set up message callbacks for this specific GUI
@@ -320,6 +331,20 @@ def main():
 
   add_button = tk.Button(button_frame, text="ADD", command=add_gui)
   add_button.pack(pady=5)
+
+  # Test button to publish test messages
+  def publish_test_message():
+      if gui_list:
+          test_sensor_id = gui_list[0].sensor_id
+          client.publish(f"task11.1/sensorData/{test_sensor_id}", "123.45")
+          client.publish(f"task11.1/ledStateData/{test_sensor_id}", "1")
+          client.publish(f"task11.1/ledBrightnessData/{test_sensor_id}", "75")
+          client.publish(f"task11.1/sensorStatus/{test_sensor_id}", "OK")
+          client.publish(f"task11.1/motionSensorStatus/{test_sensor_id}", "OK")
+          print(f"Published test messages for sensor {test_sensor_id}")
+
+  test_button = tk.Button(button_frame, text="Test Publish", command=publish_test_message)
+  test_button.pack(pady=5)
 
   # Create first default sensor GUI (can be removed if desired)
   add_gui()
