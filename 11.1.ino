@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include <WiFiNINA.h>
 #include <PubSubClient.h>
+#include <Arduino.h>
 
 #define TC_TIMER       TC3
 #define TC_TIMER_IRQn  TC3_IRQn
@@ -20,7 +21,7 @@ const char* topic2 = "task11.1/ledStateChangeCommand";
 const char* topic3 = "task11.1/ledValueCommand";
 const char* topic4 = "task11.1/ledBrightnessData";
 const char* topic_sensor_status = "task11.1/sensorStatus";
-
+const char* topic_motion_sensor_status = "task11.1/motionSensorStatus";  // New topic for motion sensor status
 
 const int motionPin = 2;
 const int ledPin = 3;
@@ -32,6 +33,12 @@ volatile bool ledState = false;
 unsigned long lastMotionTime = 0; // To track the last motion time
 const unsigned long countdownDuration = 60000 * 20; // 20 minutes in milliseconds
 volatile uint8_t timerCounter = 0; //count
+
+// New variables for motion sensor error detection
+unsigned long lastMotionDetectedTime = 0;  // Last time motion was detected
+bool motionSensorErrorReported = false;
+const unsigned long motionSensorTimeout = 60000 *60 *12; // 12 hours timeout to suspect sensor error
+
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -90,12 +97,13 @@ void TC_HANDLER() {
       } else {
         int pwmValue;
         if (latestLightValue < 100) {
-        pwmValue = 255; // Maximum brightness
+          pwmValue = 255; // Maximum brightness
         } else if (latestLightValue > 300) {
           pwmValue = 0;
+          currentBrightness = 0;
           analogWrite(ledPin,0);
         } else {
-        pwmValue = map(latestLightValue, 100, 300, 255, 0); // Map lux from 100 to 1000
+          pwmValue = map(latestLightValue, 100, 300, 255, 0); // Map lux from 100 to 300
         }
         pwmValue = constrain(pwmValue, 0, 255);  // Ensure it's within PWM range
         if (ledState & pwmValue != 0) {
@@ -110,6 +118,7 @@ void TC_HANDLER() {
 }
 
 void setup() {
+  Serial.begin(115200);
   connectToWiFi();
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
@@ -124,6 +133,8 @@ void setup() {
   } else {
     Serial.println(F("Error initialising BH1750"));
   }
+
+  lastMotionDetectedTime = millis();  // Initialize last motion detected time
 }
 
 float readLightValue() {
@@ -131,14 +142,14 @@ float readLightValue() {
     float lux = lightMeter.readLightLevel();
     if (lux < 0 || lux > 100000) {
       Serial.println("Invalid sensor reading detected!");
-      sendSensorStatus(false);  // Gửi trạng thái lỗi
+      sendSensorStatus(false);  // Send sensor error status
       return -1.0;
     }
-    sendSensorStatus(true);  // Gửi trạng thái OK
+    sendSensorStatus(true);  // Send sensor OK status
     return lux;
   }
   Serial.println("Measurement not ready");
-  sendSensorStatus(false);  // Gửi trạng thái lỗi
+  sendSensorStatus(false);  // Send sensor error status
   return -1.0;
 }
 
@@ -181,7 +192,7 @@ void turnOnCommand() {
   } else if (lux > 300) {
     pwmValue = 0; // Turn off the LED
   } else {
-    pwmValue = map(lux, 100, 300, 255, 0); // Map lux from 100 to 1000
+    pwmValue = map(lux, 100, 300, 255, 0); // Map lux from 100 to 300
   }
   pwmValue = constrain(pwmValue, 0, 255);  // Ensure it's within PWM range
   currentBrightness = map(pwmValue, 0, 255, 0, 100);
@@ -247,12 +258,21 @@ void setIntensity(int percentage) {
 }
 
 void sendSensorStatus(bool status) {
-  // status = true: cảm biến OK, false: lỗi cảm biến
+  // status = true: sensor OK, false: sensor error
   String statusMsg = status ? "OK" : "ERROR";
   if (client.publish(topic_sensor_status, statusMsg.c_str())) {
     Serial.println("Sensor status sent: " + statusMsg);
   } else {
     Serial.println("Failed to send sensor status");
+  }
+}
+
+void sendMotionSensorStatus(bool status) {
+  String statusMsg = status ? "OK" : "ERROR";
+  if (client.publish(topic_motion_sensor_status, statusMsg.c_str())) {
+    Serial.println("Motion sensor status sent: " + statusMsg);
+  } else {
+    Serial.println("Failed to send motion sensor status");
   }
 }
 
@@ -282,13 +302,16 @@ void sendData(float lux, bool ledState, int currentBrightness) {
 }
 
 void motionHandler() {
+  lastMotionDetectedTime = millis(); // Update last motion detected time
+  motionSensorErrorReported = false; // Reset error report if motion detected
+
   if (!motionDetected) {
     float lux = readLightValue();
     if (lux < 0) {
-    // Error value, set LED to safe mode
-    setSafeLED();
-    return;
-  }
+      // Error value, set LED to safe mode
+      setSafeLED();
+      return;
+    }
     int pwmValue;
     if (!(!(WiFi.status() != WL_CONNECTED) && client.connected())) {
       pwmValue = 255;
@@ -298,7 +321,7 @@ void motionHandler() {
       } else if (lux > 300) {
         pwmValue = 0; // Turn off the LED
       } else {
-        pwmValue = map(lux, 100, 300, 255, 0); // Map lux from 100 to 1000
+        pwmValue = map(lux, 100, 300, 255, 0); // Map lux from 100 to 300
       }
       pwmValue = constrain(pwmValue, 0, 255);  // Ensure it's within PWM range
     }
@@ -333,13 +356,26 @@ void timeCheck() {
   }
 }
 
+void checkMotionSensor() {
+  unsigned long currentTime = millis();
+  if ((currentTime - lastMotionDetectedTime) > motionSensorTimeout && !motionSensorErrorReported) {
+    Serial.println("Warning: No motion detected for a long time. Motion sensor may be malfunctioning.");
+    sendMotionSensorStatus(false); // Send error status
+    motionSensorErrorReported = true; // Avoid repeated reports
+  } else if ((currentTime - lastMotionDetectedTime) <= motionSensorTimeout) {
+    // Sensor working again, send OK status
+    sendMotionSensorStatus(true);
+    motionSensorErrorReported = false;
+  }
+}
+
 void reconnectMQTT() {
   while (!client.connected()) {
     Serial.println("Attempting MQTT connection...");
     if (client.connect("Nano33Client")) {
       Serial.println("Connected to MQTT");
-      client.subscribe(topic2); // Subcribe topic2
-      client.subscribe(topic3); // Subcribe topic3
+      client.subscribe(topic2); // Subscribe topic2
+      client.subscribe(topic3); // Subscribe topic3
     } else {
       Serial.print("Failed to connect to MQTT, rc=");
       Serial.print(client.state());
@@ -361,6 +397,7 @@ void loop() {
   }
 
   client.loop(); // Maintain connection with MQTT
-  timeCheck(); // Count down for inactivity
-  delay(10000); // Check every 10 secs
+  timeCheck();   // Count down for inactivity
+  checkMotionSensor(); // Check motion sensor status regularly
+  delay(5000);  // Check every 5 secs
 }
